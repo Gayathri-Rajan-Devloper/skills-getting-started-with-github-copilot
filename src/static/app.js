@@ -43,11 +43,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     names.forEach(name => {
       const a = activities[name];
-      const card = el("div", { class: "activity-card" }, [
+      const card = el("div", { class: "activity-card", "data-activity": name, "data-max": String(a.max_participants) }, [
         el("h4", { text: name }),
         el("p", { text: a.description }),
         el("p", { text: `Schedule: ${a.schedule}` }),
-        el("p", { text: `Capacity: ${a.participants.length} / ${a.max_participants}` }),
+        el("p", { class: "activity-capacity", text: `Capacity: ${a.participants.length} / ${a.max_participants}` }),
       ]);
 
       // Participants section
@@ -57,8 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (Array.isArray(a.participants) && a.participants.length > 0) {
         const ul = el("ul", { class: "participants-list" });
         a.participants.forEach(p => {
-          const li = el("li", { text: p });
-          ul.appendChild(li);
+          ul.appendChild(createParticipantListItem(name, p));
         });
         participantsWrap.appendChild(ul);
       } else {
@@ -68,6 +67,58 @@ document.addEventListener("DOMContentLoaded", () => {
       card.appendChild(participantsWrap);
       container.appendChild(card);
     });
+  }
+
+  function createParticipantListItem(activityName, participantEmail) {
+    const li = el("li");
+    const emailSpan = el("span", { text: participantEmail, class: "participant-email" });
+    const removeBtn = el("button", { class: "participant-remove", title: "Unregister" }, "✖");
+
+    removeBtn.addEventListener("click", async () => {
+      if (!confirm(`Unregister ${participantEmail} from ${activityName}?`)) return;
+      const url = `/activities/${encodeURIComponent(activityName)}/unregister?email=${encodeURIComponent(participantEmail)}`;
+      try {
+        const res = await fetch(url, { method: "DELETE" });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showMessage(body.detail || body.message || "Unregister failed.", "error");
+          return;
+        }
+        showMessage(body.message || "Unregistered successfully", "success");
+        const activities = await loadActivities();
+        renderActivities(activities);
+        populateSelect(activities);
+      } catch (err) {
+        showMessage("Network error. Please try again.", "error");
+      }
+    });
+
+    li.appendChild(emailSpan);
+    li.appendChild(removeBtn);
+    return li;
+  }
+
+  function addParticipantToCard(activityName, participantEmail) {
+    const cards = Array.from(document.querySelectorAll('.activity-card'));
+    const card = cards.find(c => c.getAttribute('data-activity') === activityName);
+    if (!card) return;
+
+    const participantsWrap = card.querySelector('.participants');
+    let ul = card.querySelector('.participants-list');
+    const empty = card.querySelector('.participants-empty');
+    if (!ul) {
+      // remove empty placeholder if present
+      if (empty) empty.remove();
+      ul = el('ul', { class: 'participants-list' });
+      participantsWrap.appendChild(ul);
+    }
+    ul.appendChild(createParticipantListItem(activityName, participantEmail));
+
+    // update capacity display and data-max if present
+    const capacityEl = card.querySelector('.activity-capacity');
+    const max = parseInt(card.getAttribute('data-max') || '0', 10);
+    const current = ul.querySelectorAll('li').length;
+    if (capacityEl) capacityEl.textContent = `Capacity: ${current} / ${max}`;
   }
 
   function populateSelect(activities) {
@@ -108,9 +159,10 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       showMessage(body.message || "Signed up successfully!", "success");
-      // reload activities to update participants list and capacity
+      // Optimistically update the DOM so the new participant appears immediately
+      addParticipantToCard(activity, email);
+      // refresh select/options in case activities changed
       const activities = await loadActivities();
-      renderActivities(activities);
       populateSelect(activities);
       document.getElementById("signup-form").reset();
     } catch (err) {
